@@ -38,8 +38,6 @@ public class Boat extends Entity {
     public Boat(int xr, int yr) {
         super(xr, yr);
     }
-
-    @Override
     public void render(Screen screen) {
         int xo = x - 4; // Horizontal
         int yo = (y - 8) - boatHeight; // Vertical
@@ -150,11 +148,6 @@ public class Boat extends Entity {
     }
 
     @Override
-    public boolean blocks(Entity entity) {
-        return true;
-    }
-
-    @Override
     public boolean interact(Player player, @Nullable Item item, Direction attackDir) {
     	if (item instanceof PowerGloveItem) {
     		Sound.genericHurt.playOnLevel(this.x, this.y);
@@ -256,9 +249,9 @@ public class Boat extends Entity {
                 continue; // can't interact with yourself LOL
             }
 
-            if (entity.blocks(this)) {
-                return false; // if the entity prevents this one from movement, don't move.
-            }
+
+            return false; // if the entity prevents this one from movement, don't move.
+
         }
 
         // finally, the entity moves!
