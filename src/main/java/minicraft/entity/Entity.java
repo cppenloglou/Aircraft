@@ -37,8 +37,8 @@ public abstract class Entity implements Tickable {
     protected static final Random random = new Random();
 
     // x, y entity coordinates on the map
-    public int x;
-    public int y;
+    private int x;
+    private int y;
 
     // x, y radius of entity (hitbox)
     private int xr;
@@ -46,9 +46,9 @@ public abstract class Entity implements Tickable {
 
 	private boolean removed; // If the entity is to be removed from the level.
 	protected Level level; // The level that the entity is on.
-    public int color; // Current color. (deprecated for some cases)
+    public final int color; // Current color. (deprecated for some cases)
 
-    public int eid; // Entity id
+    private int eid; // Entity id
 
 	/**
 	 * Default constructor for the Entity class.
@@ -58,7 +58,7 @@ public abstract class Entity implements Tickable {
 	 * @param xr X radius of entity.
 	 * @param yr Y radius of entity.
 	 */
-	public Entity(int xr, int yr) { // Add color to this later, in color update
+	protected Entity(int xr, int yr) { // Add color to this later, in color update
 		this.xr = xr;
 		this.yr = yr;
 		
@@ -70,9 +70,7 @@ public abstract class Entity implements Tickable {
     }
 
     public abstract void render(Screen screen); /// used to render the entity on screen.
-
-    @Override
-    public abstract void tick(); /// used to update the entity.
+    /// used to update the entity.
 
     /**
      * Returns true if the entity is removed from the level, otherwise false.
@@ -155,9 +153,9 @@ public abstract class Entity implements Tickable {
 	/** Moves an entity horizontally and vertically. Returns whether entity was unimpeded in it's movement.  */
 	public boolean move(int xd, int yd) {
 		if (Updater.saving || (xd == 0 && yd == 0)) return true; // Pretend that it kept moving
-		boolean stopped = true; // Used to check if the entity has BEEN stopped, COMPLETELY; below checks for a lack of collision.
-		if (move2(xd, 0)) stopped = false; // Becomes false if horizontal movement was successful.
-		if (move2(0, yd)) stopped = false; // Becomes false if vertical movement was successful.
+		boolean stopped = !move2(xd, 0); // Used to check if the entity has BEEN stopped, COMPLETELY; below checks for a lack of collision.
+        // Becomes false if horizontal movement was successful.
+        if (move2(0, yd)) stopped = false; // Becomes false if vertical movement was successful.
 		if (!stopped) {
 			int xt = x >> 4; // The x tile coordinate that the entity is standing on.
 			int yt = y >> 4; // The y tile coordinate that the entity is standing on.
@@ -179,78 +177,87 @@ public abstract class Entity implements Tickable {
             return true; // Was not stopped
         }
 
-        boolean interact = true;
+        int[] currentTileCoords = getCurrentTileCoords();
+        int[] newTileCoords = getNewTileCoords(xd, yd);
 
-        // Gets the tile coordinate of each direction from the sprite...
-        int xto0 = ((x) - xr) >> 4; // To the left
-        int yto0 = ((y) - yr) >> 4; // Above
-        int xto1 = ((x) + xr) >> 4; // To the right
-        int yto1 = ((y) + yr) >> 4; // Below
-
-        // Gets same as above, but after movement.
-        int xt0 = ((x + xd) - xr) >> 4;
-        int yt0 = ((y + yd) - yr) >> 4;
-        int xt1 = ((x + xd) + xr) >> 4;
-        int yt1 = ((y + yd) + yr) >> 4;
-
-        // boolean blocked = false; // If the next tile can block you.
-        for (int yt = yt0; yt <= yt1; yt++) { // Cycles through y's of tile after movement
-            for (int xt = xt0; xt <= xt1; xt++) { // Cycles through x's of tile after movement
-                if (xt >= xto0 && xt <= xto1 && yt >= yto0 && yt <= yto1) {
-                    continue; // Skip this position if this entity's sprite is touching it
+        for (int yt = newTileCoords[1]; yt <= newTileCoords[3]; yt++) {
+            for (int xt = newTileCoords[0]; xt <= newTileCoords[2]; xt++) {
+                if (isSpriteTouchingTile(xt, yt, currentTileCoords)) {
+                    continue;
                 }
-                
-                // Tile positions that make it here are the ones that the entity will be in, but are not in now.
-                if (interact) {
-                    level.getTile(xt, yt).bumpedInto(level, xt, yt, this); // Used in tiles like cactus
-                }
-                
-                if (!level.getTile(xt, yt).mayPass(level, xt, yt, this)) { // If the entity can't pass this tile...
-                    // blocked = true; // Then the entity is blocked
+
+                level.getTile(xt, yt).bumpedInto(level, xt, yt, this);
+
+                if (!level.getTile(xt, yt).mayPass(level, xt, yt, this)) {
                     return false;
                 }
             }
         }
+        List<Entity> isInside = getEntitiesInNewRect(xd, yd);
 
-        // These lists are named as if the entity has already moved-- it hasn't, though.
-        List<Entity> wasInside = level.getEntitiesInRect(getBounds()); // Gets all of the entities that are inside this entity (aka: colliding) before moving.
+        handleEntityInteractions(isInside);
+
+        if (checkEntityBlocks(isInside)) {
+            return false;
+        }
+
+        updateEntityPosition(xd, yd);
+        return true;
+    }
+
+    private List<Entity> getEntitiesInNewRect(int xd, int yd) {
         int xr = this.xr;
         int yr = this.yr;
+        Rectangle newRect = new Rectangle(x + xd, y + yd, xr * 2, yr * 2, Rectangle.CENTER_DIMS);
+        return level.getEntitiesInRect(newRect);
+    }
 
-        List<Entity> isInside = level.getEntitiesInRect(new Rectangle(x + xd, y + yd, xr * 2, yr * 2, Rectangle.CENTER_DIMS)); // Gets the entities                                                                                        // moved.
-        if (interact) {
-            for (Entity entity : isInside) {
-                /// Cycles through entities about to be touched, and calls touchedBy(this) for each of them.
-                if (entity == this) {
-                    continue; // Touching yourself doesn't count.
-                }
 
-                if (entity instanceof Player) {
-                    if (!(this instanceof Player)) {
-                        touchedBy(entity);
-                    }
-                } else {
-                    entity.touchedBy(this);// Call the method. ("touch" the entity)
-                } 
-            }
-        }
+    private int[] getCurrentTileCoords() {
+        int xto0 = ((x) - xr) >> 4;
+        int yto0 = ((y) - yr) >> 4;
+        int xto1 = ((x) + xr) >> 4;
+        int yto1 = ((y) + yr) >> 4;
+        return new int[]{xto0, yto0, xto1, yto1};
+    }
 
-        isInside.removeAll(wasInside); // Remove all the entities that this one is already touching before moving.
+    private int[] getNewTileCoords(int xd, int yd) {
+        int xt0 = ((x + xd) - xr) >> 4;
+        int yt0 = ((y + yd) - yr) >> 4;
+        int xt1 = ((x + xd) + xr) >> 4;
+        int yt1 = ((y + yd) + yr) >> 4;
+        return new int[]{xt0, yt0, xt1, yt1};
+    }
+
+    private boolean isSpriteTouchingTile(int xt, int yt, int[] currentTileCoords) {
+        return xt >= currentTileCoords[0] && xt <= currentTileCoords[2] &&
+                yt >= currentTileCoords[1] && yt <= currentTileCoords[3];
+    }
+
+    private void handleEntityInteractions(List<Entity> isInside) {
         for (Entity entity : isInside) {
-            if (entity == this) {
-                continue; // Can't interact with yourself
+            if (entity == this || (entity instanceof Player && !(this instanceof Player))) {
+                continue;
             }
-            if (entity.blocks(this)) {
-                return false; // If the entity prevents this one from movement, don't move.
-            }
+            entity.touchedBy(this);
         }
+    }
 
-        // Finally, the entity moves!
+    private boolean checkEntityBlocks(List<Entity> isInside) {
+        for (Entity entity : isInside) {
+            if (entity == this || !entity.blocks(this)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void updateEntityPosition(int xd, int yd) {
         x += xd;
         y += yd;
-
-        return true; // the move was successful.
     }
+
 
     /**
      * This exists as a way to signify that the entity has been removed through
@@ -264,8 +271,6 @@ public abstract class Entity implements Tickable {
 
     /** Removes the entity from the level. */
     public void remove() {
-        // if (removed && !(this instanceof ItemEntity)) // Apparently this happens fairly often with item entities.
-        // System.out.println("Note: remove() called on removed entity: " + this);
 
         removed = true;
 
@@ -316,7 +321,7 @@ public abstract class Entity implements Tickable {
         }
 
         // Calculate the distance between the two entities, in entity coordinates.
-        double distance = Math.abs(Math.hypot(x - other.x, y - other.y)); 
+        double distance = Math.abs(Math.hypot(x - other.x, y - other.y));
 
         // Compare the distance (converted to tile units) with the specified radius.
         return Math.round(distance) >> 4 <= tileRadius; 
