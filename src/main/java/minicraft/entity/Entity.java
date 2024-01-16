@@ -39,27 +39,6 @@ public abstract class Entity implements Tickable {
     // x, y entity coordinates on the map
     public int x;
     public int y;
-
-    public int getX() {
-        return x;
-    }
-
-    public int getY() {
-        return y;
-    }
-
-    public int getXr() {
-        return xr;
-    }
-
-    public int getYr() {
-        return yr;
-    }
-
-    public int getColor() {
-        return color;
-    }
-
     // x, y radius of entity (hitbox)
     public int xr;
     public int yr;
