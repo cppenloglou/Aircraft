@@ -1,6 +1,7 @@
 package minicraft.entity;
 import org.tinylog.Logger;
 
+import minicraft.core.Game;
 import minicraft.level.Level;
 import minicraft.network.Network;
 
@@ -15,6 +16,18 @@ public class LifecycleManager {
 
         if (entity.getLevel() != null) {
             entity.getLevel().remove(entity);
+        }
+    }
+
+    public void remove(Entity entity, Level level) {
+        if (level != entity.getLevel()) {
+            if (Game.debug) {
+                Logger.info("Tried to remove entity " + entity + " from level it is not in: " + level +
+                        "; in level " + entity.getLevel());
+            }
+        } else {
+            entity.setRemoved(true);
+            entity.setLevel(null);
         }
     }
 
