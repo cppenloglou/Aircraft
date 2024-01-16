@@ -41,13 +41,15 @@ public abstract class Entity implements Tickable {
     public int y;
 
     // x, y radius of entity (hitbox)
-    private int xr;
-    private int yr;
+    public int xr;
+    public int yr;
 
 	private boolean removed; // If the entity is to be removed from the level.
 	protected Level level; // The level that the entity is on.
     public int color; // Current color. (deprecated for some cases)
-
+    private final MovementHandler movementHandler = new MovementHandler();
+    private final InteractionHandler interactionHandler = new InteractionHandler();
+    private final LifecycleManager lifecycleManager = new LifecycleManager();
     public int eid; // Entity id
 
 	/**
@@ -135,10 +137,6 @@ public abstract class Entity implements Tickable {
     	this.yr = h;
     }
 
-    /** if this entity is touched by another entity (extended by sub-classes) */
-    protected void touchedBy(Entity entity) {
-    }
-
     /**
      * Interacts with the entity this method is called on
      * 
@@ -148,163 +146,37 @@ public abstract class Entity implements Tickable {
      * @return If the interaction was successful
      */
     public boolean interact(Player player, @Nullable Item item, Direction attackDir) {
+        interactionHandler.handleInteraction(this, player, item, attackDir);
         return false;
     }
 
+    protected void touchedBy(Entity entity) {
+        interactionHandler.handleTouch(this, entity);
+    }
 
-	/** Moves an entity horizontally and vertically. Returns whether entity was unimpeded in it's movement.  */
-	public boolean move(int xd, int yd) {
-		if (Updater.saving || (xd == 0 && yd == 0)) return true; // Pretend that it kept moving
-		boolean stopped = true; // Used to check if the entity has BEEN stopped, COMPLETELY; below checks for a lack of collision.
-		if (move2(xd, 0)) stopped = false; // Becomes false if horizontal movement was successful.
-		if (move2(0, yd)) stopped = false; // Becomes false if vertical movement was successful.
-		if (!stopped) {
-			int xt = x >> 4; // The x tile coordinate that the entity is standing on.
-			int yt = y >> 4; // The y tile coordinate that the entity is standing on.
-			level.getTile(xt, yt).steppedOn(level, xt, yt, this); // Calls the steppedOn() method in a tile's class. (used for tiles like sand (footprints) or lava (burning))
-		}
-		return !stopped;
-	}
 
-    /**
-     * Moves the entity a long only one direction. If xd != 0 then ya should be 0.
-     * If xd = 0 then ya should be != 0. Will throw exception otherwise.
-     * 
-     * @param xd Horizontal move.
-     * @param yd Vertical move.
-     * @return true if the move was successful, false if not.
-     */
+    public boolean move(int xd, int yd) {
+        return movementHandler.move(this, xd, yd);
+    }
+
     protected boolean move2(int xd, int yd) {
-        if (xd == 0 && yd == 0) {
-            return true; // Was not stopped
-        }
-
-        boolean interact = true;
-
-        // Gets the tile coordinate of each direction from the sprite...
-        int xto0 = ((x) - xr) >> 4; // To the left
-        int yto0 = ((y) - yr) >> 4; // Above
-        int xto1 = ((x) + xr) >> 4; // To the right
-        int yto1 = ((y) + yr) >> 4; // Below
-
-        // Gets same as above, but after movement.
-        int xt0 = ((x + xd) - xr) >> 4;
-        int yt0 = ((y + yd) - yr) >> 4;
-        int xt1 = ((x + xd) + xr) >> 4;
-        int yt1 = ((y + yd) + yr) >> 4;
-
-        // boolean blocked = false; // If the next tile can block you.
-        for (int yt = yt0; yt <= yt1; yt++) { // Cycles through y's of tile after movement
-            for (int xt = xt0; xt <= xt1; xt++) { // Cycles through x's of tile after movement
-                if (xt >= xto0 && xt <= xto1 && yt >= yto0 && yt <= yto1) {
-                    continue; // Skip this position if this entity's sprite is touching it
-                }
-                
-                // Tile positions that make it here are the ones that the entity will be in, but are not in now.
-                if (interact) {
-                    level.getTile(xt, yt).bumpedInto(level, xt, yt, this); // Used in tiles like cactus
-                }
-                
-                if (!level.getTile(xt, yt).mayPass(level, xt, yt, this)) { // If the entity can't pass this tile...
-                    // blocked = true; // Then the entity is blocked
-                    return false;
-                }
-            }
-        }
-
-        // These lists are named as if the entity has already moved-- it hasn't, though.
-        List<Entity> wasInside = level.getEntitiesInRect(getBounds()); // Gets all of the entities that are inside this entity (aka: colliding) before moving.
-        int xr = this.xr;
-        int yr = this.yr;
-
-        List<Entity> isInside = level.getEntitiesInRect(new Rectangle(x + xd, y + yd, xr * 2, yr * 2, Rectangle.CENTER_DIMS)); // Gets the entities                                                                                        // moved.
-        if (interact) {
-            for (Entity entity : isInside) {
-                /// Cycles through entities about to be touched, and calls touchedBy(this) for each of them.
-                if (entity == this) {
-                    continue; // Touching yourself doesn't count.
-                }
-
-                if (entity instanceof Player) {
-                    if (!(this instanceof Player)) {
-                        touchedBy(entity);
-                    }
-                } else {
-                    entity.touchedBy(this);// Call the method. ("touch" the entity)
-                } 
-            }
-        }
-
-        isInside.removeAll(wasInside); // Remove all the entities that this one is already touching before moving.
-        for (Entity entity : isInside) {
-            if (entity == this) {
-                continue; // Can't interact with yourself
-            }
-            if (entity.blocks(this)) {
-                return false; // If the entity prevents this one from movement, don't move.
-            }
-        }
-
-        // Finally, the entity moves!
-        x += xd;
-        y += yd;
-
-        return true; // the move was successful.
+        return movementHandler.move2(this, xd, yd);
     }
 
-    /**
-     * This exists as a way to signify that the entity has been removed through
-     * player action and/or world action; basically, it's actually gone, not just
-     * removed from a level because it's out of range or something. Calls to this
-     * method are used to, say, drop items.
-     */
     public void die() {
-        remove();
+        lifecycleManager.die(this);
     }
 
-    /** Removes the entity from the level. */
     public void remove() {
-        // if (removed && !(this instanceof ItemEntity)) // Apparently this happens fairly often with item entities.
-        // System.out.println("Note: remove() called on removed entity: " + this);
-
-        removed = true;
-
-        if (level == null) {
-        	Logger.warn("Note: remove() called on entity with no level reference: " + getClass());
-        } else {
-            level.remove(this);
-        }
+        lifecycleManager.remove(this);
     }
 
-    /**
-     * This should ONLY be called by the Level class. To properly remove an entity
-     * from a level, use level.remove(entity)
-     */
     public void remove(Level level) {
-        if (level != this.level) {
-            if (Game.debug) Logger.info("Tried to remove entity " + this + " from level it is not in: " + level + "; in level " + this.level);
-        } else {
-            removed = true; // Should already be set.
-            this.level = null;
-        }
+        lifecycleManager.remove(this, level);
     }
 
-    /**
-     * This should ONLY be called by the Level class. To properly add an entity to a
-     * level, use level.add(entity)
-     */
     public void setLevel(Level level, int x, int y) {
-        if (level == null) {
-            Logger.warn("Tried to set level of entity " + this + " to a null level; Should use remove(level)");
-            return;
-        }
-
-        this.level = level;
-        removed = false;
-        this.x = x;
-        this.y = y;
-
-        if (eid < 0) eid = Network.generateUniqueEntityId();
+        lifecycleManager.setLevel(this, level, x, y);
     }
 
     public boolean isWithin(int tileRadius, Entity other) {
@@ -365,5 +237,35 @@ public abstract class Entity implements Tickable {
     @Override
     public final int hashCode() {
         return eid;
+    }
+
+    public void setRemoved(boolean b) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'setRemoved'");
+    }
+
+    public void setLevel(Level level2) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'setLevel'");
+    }
+
+    public void setX(int x2) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'setX'");
+    }
+
+    public void setY(int y2) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'setY'");
+    }
+
+    public int getEid() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getEid'");
+    }
+
+    public void setEid(int uniqueEntityId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'setEid'");
     }
 }
